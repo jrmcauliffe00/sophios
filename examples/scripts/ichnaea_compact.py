@@ -3,10 +3,16 @@
 from argparse import ArgumentParser
 import copy
 from datetime import datetime
+import json
 from pathlib import Path
-from typing import Dict
+from typing import Dict, cast
 
 from sophios.apis.python.api import Workflow
+from sophios.apis.python.airflow_bridge import (
+    get_airflow_dag,
+    submit_airflow_dag_via_api,
+    write_airflow_dag_file,
+)
 from sophios.wic_types import Json
 
 from sophios.apis.python.cwl_builder import CommandLineTool, Input, Inputs, Output, Outputs, cwl
@@ -114,6 +120,36 @@ def main() -> int:
         "--submit-url",
         help="Optional compute create-workflow endpoint. If omitted, only build the payload in memory.",
     )
+    parser.add_argument(
+        "--write-airflow-dag",
+        action="store_true",
+        help="Write a generated Airflow DAG Python module to disk.",
+    )
+    parser.add_argument(
+        "--airflow-dags-dir",
+        default="./dags",
+        help="Directory where generated Airflow DAG files are written.",
+    )
+    parser.add_argument(
+        "--airflow-dag-filename",
+        help="Optional filename override for the generated Airflow DAG module.",
+    )
+    parser.add_argument(
+        "--trigger-airflow-run",
+        action="store_true",
+        help="Trigger a DAG run via Airflow REST API (requires --airflow-api-base-url).",
+    )
+    parser.add_argument("--airflow-api-base-url", help="Airflow base URL, e.g. http://localhost:8080")
+    parser.add_argument("--airflow-api-token", help="Bearer token for Airflow API auth.")
+    parser.add_argument("--airflow-api-username", help="Username for basic-auth Airflow API auth.")
+    parser.add_argument("--airflow-api-password", help="Password for basic-auth Airflow API auth.")
+    parser.add_argument("--airflow-run-id", help="Optional DAG run id for Airflow trigger requests.")
+    parser.add_argument("--airflow-conf-json", help="Optional JSON object to pass as DAG run conf.")
+    parser.add_argument(
+        "--airflow-insecure",
+        action="store_true",
+        help="Disable TLS verification for Airflow API calls (testing only).",
+    )
     args = parser.parse_args()
 
     # ========== INPUTS TO WORKFLOW ==================
@@ -127,6 +163,39 @@ def main() -> int:
     # ========== BUILD WORKFLOW ======================
     autoseg_workflow = workflow(input_dicts, "autoseg_workflow")
     workflow_json = autoseg_workflow.get_cwl_workflow()
+    airflow_dag = get_airflow_dag(autoseg_workflow, compiled_workflow=workflow_json)
+    print(f"Built Airflow DAG in memory: dag_id={airflow_dag.dag_id}")
+    if args.write_airflow_dag:
+        dag_file_path = write_airflow_dag_file(
+            autoseg_workflow,
+            dags_dir=Path(args.airflow_dags_dir),
+            dag_filename=args.airflow_dag_filename,
+            dag_id=airflow_dag.dag_id,
+            compiled_workflow=workflow_json,
+        )
+        print(f"Wrote Airflow DAG file: {dag_file_path.resolve()}")
+    if args.trigger_airflow_run:
+        if not args.airflow_api_base_url:
+            raise ValueError("--airflow-api-base-url is required with --trigger-airflow-run")
+        dag_conf: Json | None = None
+        if args.airflow_conf_json:
+            parsed_conf = json.loads(args.airflow_conf_json)
+            if not isinstance(parsed_conf, dict):
+                raise ValueError("--airflow-conf-json must be a JSON object")
+            dag_conf = cast(Json, parsed_conf)
+        trigger_response = submit_airflow_dag_via_api(
+            autoseg_workflow,
+            airflow_api_base_url=args.airflow_api_base_url,
+            dag_id=airflow_dag.dag_id,
+            run_id=args.airflow_run_id,
+            conf=dag_conf,
+            api_token=args.airflow_api_token,
+            api_username=args.airflow_api_username,
+            api_password=args.airflow_api_password,
+            verify_ssl=not args.airflow_insecure,
+            compiled_workflow=workflow_json,
+        )
+        print(f"Triggered Airflow DAG run: {trigger_response.get('dag_run_id', '<unknown>')}")
 
     # ========== COMPUTE INPUT =======================
     # workflow Name
