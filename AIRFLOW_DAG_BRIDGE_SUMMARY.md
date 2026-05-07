@@ -6,6 +6,9 @@
 - Added `get_airflow_dag(...)` for in-memory DAG construction.
 - Added `write_airflow_dag_file(...)` to render and write a DAG module to disk (default `./dags/<dag_id>_dag.py`).
 - Added `submit_airflow_dag_via_api(...)` + `submit_airflow_dag_run(...)` to trigger a DAG run via Airflow REST API without writing a local DAG file.
+- Added task emission mode support:
+  - `placeholder` -> always `EmptyOperator`
+  - `auto` -> infer `BashOperator` from CWL `CommandLineTool` `baseCommand`/`arguments` when possible, otherwise fallback to `EmptyOperator`
 - Added CLI controls:
   - `--write-airflow-dag`
   - `--airflow-dags-dir`
@@ -13,6 +16,7 @@
   - `--trigger-airflow-run`
   - `--airflow-api-*` auth/base-url options
   - `--airflow-conf-json`
+  - `--airflow-task-mode {placeholder,auto}`
 - Updated imports to current Airflow paths (`airflow.sdk` and `airflow.providers.standard.operators.empty`).
 - Implemented typed helper utilities to translate compiled Sophios/CWL step dependencies into Airflow task dependencies.
 - Added import guard with a clear error if Airflow is not installed.
