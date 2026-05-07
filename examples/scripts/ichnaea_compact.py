@@ -150,6 +150,12 @@ def main() -> int:
         action="store_true",
         help="Disable TLS verification for Airflow API calls (testing only).",
     )
+    parser.add_argument(
+        "--airflow-task-mode",
+        default="placeholder",
+        choices=("placeholder", "auto"),
+        help="Task emission mode: placeholder emits EmptyOperator, auto infers executable operators from CWL.",
+    )
     args = parser.parse_args()
 
     # ========== INPUTS TO WORKFLOW ==================
@@ -163,7 +169,11 @@ def main() -> int:
     # ========== BUILD WORKFLOW ======================
     autoseg_workflow = workflow(input_dicts, "autoseg_workflow")
     workflow_json = autoseg_workflow.get_cwl_workflow()
-    airflow_dag = get_airflow_dag(autoseg_workflow, compiled_workflow=workflow_json)
+    airflow_dag = get_airflow_dag(
+        autoseg_workflow,
+        task_mode=args.airflow_task_mode,
+        compiled_workflow=workflow_json,
+    )
     print(f"Built Airflow DAG in memory: dag_id={airflow_dag.dag_id}")
     if args.write_airflow_dag:
         dag_file_path = write_airflow_dag_file(
@@ -171,6 +181,7 @@ def main() -> int:
             dags_dir=Path(args.airflow_dags_dir),
             dag_filename=args.airflow_dag_filename,
             dag_id=airflow_dag.dag_id,
+            task_mode=args.airflow_task_mode,
             compiled_workflow=workflow_json,
         )
         print(f"Wrote Airflow DAG file: {dag_file_path.resolve()}")
@@ -193,6 +204,7 @@ def main() -> int:
             api_username=args.airflow_api_username,
             api_password=args.airflow_api_password,
             verify_ssl=not args.airflow_insecure,
+            task_mode=args.airflow_task_mode,
             compiled_workflow=workflow_json,
         )
         print(f"Triggered Airflow DAG run: {trigger_response.get('dag_run_id', '<unknown>')}")
